@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#13324B">
+<title>BOS · DATEV-Auswertung</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --navy:#13324B; --navy2:#2C5072; --paper:#F4F1EA; --white:#fff;
+    --red:#C2402E; --gold:#A8843E; --sea:#3E6B5A;
+    --line:#D8D4C8; --ink:#1B2C38; --muted:#6B7782;
+    --radius:10px;
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  }
+  body{font-family:var(--font);background:var(--paper);color:var(--ink);line-height:1.55;min-height:100vh;}
+
+  /* TOPBAR */
+  .topbar{background:var(--navy);color:#fff;padding:0 1.25rem;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand .badge{background:var(--red);font-size:12px;font-weight:800;letter-spacing:.06em;padding:3px 8px;border-radius:4px;}
+  .brand .t{font-size:15px;font-weight:500;color:#e6e6e6;}
+  .topbar .meta{font-size:12px;color:#9DB3C5;font-family:'Segoe UI',monospace;}
+
+  .wrap{max-width:920px;margin:0 auto;padding:1.25rem;}
+
+  /* CONTROLS */
+  .controls{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;}
+  .month-sel{display:flex;align-items:center;gap:.5rem;}
+  .month-sel label{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
+  select,.btn{font-family:var(--font);font-size:14px;}
+  select{padding:.5rem .75rem;border:1.5px solid var(--line);border-radius:var(--radius);background:#fff;color:var(--ink);-webkit-appearance:none;appearance:none;min-width:130px;}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:.6rem 1rem;border:none;border-radius:var(--radius);font-weight:600;cursor:pointer;transition:opacity .15s,transform .1s;-webkit-tap-highlight-color:transparent;}
+  .btn:active{transform:scale(.98);}
+  .btn-navy{background:var(--navy);color:#fff;}
+  .btn-red{background:var(--red);color:#fff;}
+  .btn-ghost{background:transparent;border:1.5px solid var(--line);color:var(--ink);}
+  .btn-ghost:hover{border-color:var(--navy);}
+  .btn-sm{padding:.35rem .6rem;font-size:12px;border-radius:7px;}
+  .spacer{flex:1;}
+
+  /* DROPZONE */
+  .drop{display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px dashed var(--line);border-radius:14px;background:#fff;padding:1.6rem 1rem;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;margin-bottom:1.25rem;}
+  .drop.drag{border-color:var(--navy);background:#F0F4F8;}
+  .drop .ic{font-size:26px;}
+  .drop .main{font-weight:600;color:var(--navy);margin-top:.35rem;}
+  .drop .sub{font-size:13px;color:var(--muted);margin-top:.2rem;}
+  .drop input{display:none;}
+
+  /* SUMMARY STRIP */
+  .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;margin-bottom:1.25rem;}
+  .scard{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:.8rem .6rem;text-align:center;}
+  .scard .n{font-size:1.35rem;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;}
+  .scard .l{font-size:11px;color:var(--muted);margin-top:2px;letter-spacing:.02em;}
+  .scard.accent .n{color:var(--red);}
+
+  /* EMPLOYEE CARDS */
+  .emp{background:#fff;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:.75rem;overflow:hidden;}
+  .emp-head{display:flex;align-items:center;gap:.75rem;padding:.85rem 1rem;cursor:pointer;user-select:none;}
+  .emp-head:hover{background:#FAFAF7;}
+  .emp-name{font-weight:600;font-size:15px;color:var(--navy);flex:1;}
+  .emp-hours{font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink);font-size:15px;}
+  .emp-chev{color:var(--muted);transition:transform .2s;font-size:12px;}
+  .emp.open .emp-chev{transform:rotate(90deg);}
+  .emp-break{display:flex;gap:.4rem;flex-wrap:wrap;padding:0 1rem .4rem;}
+  .chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;font-variant-numeric:tabular-nums;}
+  .chip.normal{background:#EAF0E5;color:#3B6D11;}
+  .chip.nacht{background:#E6EDF5;color:#1F4E79;}
+  .chip.sonntag{background:#FBEEE0;color:#9A5B12;}
+  .chip.feiertag{background:#F7E3E0;color:#B23A29;}
+
+  .emp-body{display:none;border-top:1px solid var(--line);}
+  .emp.open .emp-body{display:block;}
+  .shift{display:grid;grid-template-columns:auto 1fr auto;gap:.6rem;align-items:center;padding:.6rem 1rem;border-bottom:1px solid #F0EEE6;font-size:13px;}
+  .shift:last-of-type{border-bottom:none;}
+  .shift .d{font-variant-numeric:tabular-nums;font-weight:600;color:var(--navy);min-width:46px;}
+  .shift .info{color:var(--ink);}
+  .shift .info .sub{color:var(--muted);font-size:12px;}
+  .shift .acts{display:flex;gap:.35rem;}
+  .icon-btn{border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 7px;cursor:pointer;font-size:12px;color:var(--muted);}
+  .icon-btn:hover{border-color:var(--navy);color:var(--navy);}
+  .icon-btn.del:hover{border-color:var(--red);color:var(--red);}
+  .emp-actions{padding:.7rem 1rem;background:#FAFAF7;display:flex;justify-content:flex-end;}
+
+  /* EMPTY */
+  .empty{text-align:center;padding:2.5rem 1rem;color:var(--muted);}
+  .empty .ic{font-size:34px;opacity:.5;}
+  .empty .t{font-weight:600;margin-top:.5rem;color:var(--ink);}
+  .empty .s{font-size:13px;margin-top:.25rem;}
+
+  /* MODAL */
+  .modal-bg{position:fixed;inset:0;background:rgba(19,50,75,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:1rem;}
+  .modal-bg.show{display:flex;}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:420px;padding:1.25rem;}
+  .modal h3{font-size:17px;color:var(--navy);margin-bottom:1rem;}
+  .fld{margin-bottom:.75rem;}
+  .fld label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px;}
+  .fld input{width:100%;padding:.6rem .7rem;border:1.5px solid var(--line);border-radius:8px;font-size:15px;font-family:var(--font);-webkit-appearance:none;}
+  .fld input:focus{outline:none;border-color:var(--navy);}
+  .fld-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;}
+  .modal-acts{display:flex;justify-content:space-between;gap:.6rem;margin-top:1.1rem;}
+
+  /* TOAST */
+  .toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(90px);background:var(--navy);color:#fff;padding:.7rem 1.2rem;border-radius:10px;font-size:14px;z-index:200;transition:transform .3s;max-width:90%;text-align:center;}
+  .toast.show{transform:translateX(-50%) translateY(0);}
+  .toast.err{background:var(--red);}
+
+  .footnote{font-size:12px;color:var(--muted);text-align:center;margin-top:1.5rem;line-height:1.6;}
+
+  @media(max-width:620px){
+    .summary{grid-template-columns:repeat(2,1fr);}
+    .fld-row{grid-template-columns:1fr 1fr;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="badge">BOS</span>
+    <span class="t">DATEV-Auswertung</span>
+  </div>
+  <span class="meta" id="storeMeta">lokal gespeichert</span>
+</div>
+
+<div class="wrap">
+
+  <!-- Dropzone -->
+  <label class="drop" id="drop">
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#13324B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:.4rem;">
+      <path d="M12 16V4M12 4l-4 4M12 4l4 4"/>
+      <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+    </svg>
+    <div class="main">Rapport-PDF(s) hier ablegen oder tippen</div>
+    <div class="sub">Mehrere Dateien gleichzeitig möglich · bereits erfasste werden erkannt</div>
+    <input type="file" id="fileInput" accept="application/pdf" multiple>
+  </label>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="month-sel">
+      <label>Monat</label>
+      <select id="monthSel" onchange="render()"></select>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn btn-red" id="exportAll" onclick="exportAll()">⤓ Alle DATEV-PDFs</button>
+    <button class="btn btn-ghost btn-sm" onclick="clearMonth()">Monat leeren</button>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary" id="summary"></div>
+
+  <!-- Employees -->
+  <div id="list"></div>
+
+  <div class="footnote" id="foot"></div>
+</div>
+
+<!-- Edit modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3 id="modalTitle">Einsatz bearbeiten</h3>
+    <div class="fld">
+      <label>Name</label>
+      <input type="text" id="m_name">
+    </div>
+    <div class="fld">
+      <label>Datum</label>
+      <input type="date" id="m_datum">
+    </div>
+    <div class="fld-row">
+      <div class="fld"><label>Von</label><input type="time" id="m_von"></div>
+      <div class="fld"><label>Bis</label><input type="time" id="m_bis"></div>
+      <div class="fld"><label>Pause (Min)</label><input type="number" id="m_pause" min="0" max="480"></div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-navy" onclick="saveEdit()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ════════ ZUSCHLAGS-ENGINE ════════
+function easter(y){
+  const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,
+    f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),
+    hh=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,
+    l=(32+2*e+2*i-hh-k)%7,m=Math.floor((a+11*hh+22*l)/451),
+    month=Math.floor((hh+l-7*m+114)/31),day=((hh+l-7*m+114)%31)+1;
+  return new Date(y,month-1,day);
+}
+function dkey(dt){return dt.getFullYear()+'-'+(dt.getMonth()+1)+'-'+dt.getDate();}
+function bwHolidays(y){
+  const e=easter(y),set=new Set(),add=dt=>set.add(dkey(dt));
+  [[1,1],[1,6],[5,1],[10,3],[11,1],[12,25],[12,26]].forEach(([mo,da])=>add(new Date(y,mo-1,da)));
+  [-2,1,39,50,60].forEach(off=>{const d=new Date(e);d.setDate(d.getDate()+off);add(d);});
+  return set;
+}
+function classifyShift(datumStr,von,bis,pauseMin){
+  const [Y,Mo,Da]=datumStr.split('-').map(Number);
+  const [vh,vm]=von.split(':').map(Number);
+  const [bh,bm]=bis.split(':').map(Number);
+  let dur=(bh*60+bm)-(vh*60+vm); if(dur<=0)dur+=1440;
+  const hol=new Set([...bwHolidays(Y),...bwHolidays(Y+1)]);
+  const base=new Date(Y,Mo-1,Da);
+  let cat={normal:0,nacht:0,sonntag:0,feiertag:0};
+  const startMin=vh*60+vm;
+  let curDay=null,cur=null,isHol=false,isSun=false;
+  for(let i=0;i<dur;i++){
+    const abs=startMin+i,dayOff=Math.floor(abs/1440),minOfDay=abs%1440,hour=Math.floor(minOfDay/60);
+    if(dayOff!==curDay){curDay=dayOff;cur=new Date(base);cur.setDate(cur.getDate()+dayOff);isHol=hol.has(dkey(cur));isSun=(cur.getDay()===0);}
+    const isNight=(hour>=20)||(hour<6);
+    if(isNight)cat.nacht++;
+    if(isHol)cat.feiertag++; else if(isSun)cat.sonntag++;
+    if(!isNight&&!isHol&&!isSun)cat.normal++;
+  }
+  const gross=dur,net=Math.max(0,gross-(pauseMin||0));
+  if(pauseMin>0&&gross>0){const f=net/gross;for(const k in cat)cat[k]*=f;}
+  return {netMin:net,normal:cat.normal,nacht:cat.nacht,sonntag:cat.sonntag,feiertag:cat.feiertag};
+}
+const H=m=>Math.round(m/60*100)/100;
+const fmtH=x=>x.toFixed(2).replace('.',',');
+const fmtH1=x=>x.toFixed(1).replace('.',',');
+
+// ════════ STORAGE ════════
+const KEY='bosDatevShifts_v1';
+let SHIFTS=[];  // {shiftId,rapportId,datum,name,taetigkeit,von,bis,pauseMin,kunde}
+
+function load(){
+  try{ SHIFTS=JSON.parse(localStorage.getItem(KEY)||'[]'); }catch(e){ SHIFTS=[]; }
+}
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(SHIFTS)); }catch(e){ toast('Speichern fehlgeschlagen',true); }
+}
+
+// ════════ PDF EINLESEN (Roh-Scan) ════════
+function fileToLatin1(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>{
+      const buf=new Uint8Array(r.result); let s=''; const CH=0x8000;
+      for(let i=0;i<buf.length;i+=CH){ s+=String.fromCharCode.apply(null,buf.subarray(i,i+CH)); }
+      res(s);
+    };
+    r.onerror=rej; r.readAsArrayBuffer(file);
+  });
+}
+function decodePayload(b64){
+  const bin=atob(b64), bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return JSON.parse(new TextDecoder('utf-8').decode(bytes));
+}
+async function parseRapport(file){
+  const txt=await fileToLatin1(file);
+  const m=txt.match(/BOSRAPPORT_V1:([A-Za-z0-9+/=]+)/);
+  if(!m) return null;
+  try{ return decodePayload(m[1]); }catch(e){ return null; }
+}
+
+// ════════ UPLOAD HANDLING ════════
+async function handleFiles(files){
+  let added=0, skipped=0, bad=0;
+  for(const f of files){
+    if(f.type!=='application/pdf' && !f.name.toLowerCase().endsWith('.pdf')){ bad++; continue; }
+    const data=await parseRapport(f);
+    if(!data){ bad++; continue; }
+    // Dedup: Rapport-ID schon vorhanden?
+    if(SHIFTS.some(s=>s.rapportId===data.id)){ skipped++; continue; }
+    (data.mitarbeiter||[]).forEach((emp,idx)=>{
+      SHIFTS.push({
+        shiftId: data.id+'_'+idx,
+        rapportId: data.id,
+        datum: data.datum,
+        name: emp.name||'(ohne Name)',
+        taetigkeit: emp.taetigkeit||'',
+        von: emp.von||'', bis: emp.bis||'',
+        pauseMin: emp.pauseMin||0,
+        kunde: data.kunde||''
+      });
+    });
+    added++;
+  }
+  save();
+  ensureMonthSelected();
+  render();
+  let msg=[];
+  if(added)   msg.push(added+' Rapport'+(added>1?'e':'')+' hinzugefügt');
+  if(skipped) msg.push(skipped+' bereits erfasst');
+  if(bad)     msg.push(bad+' ohne lesbare Daten');
+  toast(msg.join(' · ')||'Keine Dateien', bad&&!added);
+}
+
+// ════════ MONTH HELPERS ════════
+function monthOf(s){ return s.datum.slice(0,7); } // YYYY-MM
+function allMonths(){ return [...new Set(SHIFTS.map(monthOf))].sort().reverse(); }
+function monthLabel(ym){
+  const [y,m]=ym.split('-'); const names=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  return names[+m-1]+' '+y;
+}
+function ensureMonthSelected(){
+  const sel=document.getElementById('monthSel');
+  const months=allMonths();
+  const prev=sel.value;
+  sel.innerHTML='';
+  if(months.length===0){ const o=document.createElement('option'); o.value=''; o.textContent='—'; sel.appendChild(o); return; }
+  months.forEach(ym=>{ const o=document.createElement('option'); o.value=ym; o.textContent=monthLabel(ym); sel.appendChild(o); });
+  sel.value = months.includes(prev)?prev:months[0];
+}
+
+// ════════ AGGREGATION ════════
+function monthData(ym){
+  // {name: {day: {shifts:[...], pause, dauer, normal,nacht,sonntag,feiertag, shiftIds:[]}}}
+  const ma={};
+  SHIFTS.filter(s=>monthOf(s)===ym).forEach(s=>{
+    if(!s.von||!s.bis) return;
+    const c=classifyShift(s.datum,s.von,s.bis,s.pauseMin);
+    const day=+s.datum.split('-')[2];
+    const slot=(ma[s.name]=ma[s.name]||{});
+    const d=(slot[day]=slot[day]||{shifts:[],pause:0,dauer:0,normal:0,nacht:0,sonntag:0,feiertag:0,aufgez:deDate(s.datum)});
+    d.shifts.push({von:s.von,bis:s.bis,shiftId:s.shiftId,taetigkeit:s.taetigkeit,pauseMin:s.pauseMin,datum:s.datum,name:s.name});
+    d.pause+=s.pauseMin; d.dauer+=c.netMin; d.normal+=c.normal; d.nacht+=c.nacht; d.sonntag+=c.sonntag; d.feiertag+=c.feiertag;
+  });
+  return ma;
+}
+function deDate(iso){ const [y,m,d]=iso.split('-'); return d+'.'+m+'.'+y; }
+
+// ════════ RENDER ════════
+function render(){
+  ensureMonthSelected();
+  const ym=document.getElementById('monthSel').value;
+  const list=document.getElementById('list');
+  const summary=document.getElementById('summary');
+  const data= ym? monthData(ym):{};
+  const names=Object.keys(data).sort();
+
+  // Summary
+  let totReports=new Set(SHIFTS.filter(s=>monthOf(s)===ym).map(s=>s.rapportId)).size;
+  let tot={dauer:0,normal:0,nacht:0,sonntag:0,feiertag:0};
+  names.forEach(n=>Object.values(data[n]).forEach(d=>{tot.dauer+=d.dauer;tot.normal+=d.normal;tot.nacht+=d.nacht;tot.sonntag+=d.sonntag;tot.feiertag+=d.feiertag;}));
+  summary.innerHTML=`
+    <div class="scard"><div class="n">${names.length}</div><div class="l">Mitarbeiter</div></div>
+    <div class="scard accent"><div class="n">${fmtH1(H(tot.dauer))}</div><div class="l">Std. gesamt</div></div>
+    <div class="scard"><div class="n">${fmtH1(H(tot.nacht))}</div><div class="l">Nacht</div></div>
+    <div class="scard"><div class="n">${fmtH1(H(tot.sonntag))}</div><div class="l">Sonntag</div></div>
+    <div class="scard"><div class="n">${fmtH1(H(tot.feiertag))}</div><div class="l">Feiertag</div></div>`;
+
+  // Employee list
+  if(names.length===0){
+    list.innerHTML=`<div class="empty"><div class="ic">🗂️</div><div class="t">Noch keine Einsätze für diesen Monat</div><div class="s">Lade oben die Rapport-PDFs hoch — der Überblick füllt sich automatisch.</div></div>`;
+    document.getElementById('exportAll').style.display='none';
+  } else {
+    document.getElementById('exportAll').style.display='';
+    list.innerHTML=names.map(name=>{
+      const days=data[name];
+      let sum={dauer:0,normal:0,nacht:0,sonntag:0,feiertag:0};
+      Object.values(days).forEach(d=>{for(const k in sum)sum[k]+=d[k];});
+      const chips=[];
+      if(H(sum.normal)>0)  chips.push(`<span class="chip normal">Normal ${fmtH1(H(sum.normal))}</span>`);
+      if(H(sum.nacht)>0)   chips.push(`<span class="chip nacht">Nacht ${fmtH1(H(sum.nacht))}</span>`);
+      if(H(sum.sonntag)>0) chips.push(`<span class="chip sonntag">So ${fmtH1(H(sum.sonntag))}</span>`);
+      if(H(sum.feiertag)>0)chips.push(`<span class="chip feiertag">Feiertag ${fmtH1(H(sum.feiertag))}</span>`);
+      const shiftRows=Object.keys(days).sort((a,b)=>a-b).map(day=>{
+        const d=days[day];
+        return d.shifts.map(sh=>{
+          const c=classifyShift(sh.datum,sh.von,sh.bis,sh.pauseMin);
+          const bem=bemText(H(c.nacht),H(c.sonntag),H(c.feiertag));
+          return `<div class="shift">
+            <div class="d">${('0'+day).slice(-2)}.</div>
+            <div class="info">${sh.von}–${sh.bis}${sh.pauseMin?' · '+sh.pauseMin+'min Pause':''} · <strong>${fmtH(H(c.netMin))}h</strong>
+              <div class="sub">${bem||'—'}</div></div>
+            <div class="acts">
+              <button class="icon-btn" onclick="openEdit('${sh.shiftId}')">✎</button>
+              <button class="icon-btn del" onclick="delShift('${sh.shiftId}')">🗑</button>
+            </div>
+          </div>`;
+        }).join('');
+      }).join('');
+      return `<div class="emp" id="emp_${cssId(name)}">
+        <div class="emp-head" onclick="toggleEmp('${cssId(name)}')">
+          <span class="emp-chev">▶</span>
+          <span class="emp-name">${esc(name)}</span>
+          <span class="emp-hours">${fmtH(H(sum.dauer))} h</span>
+        </div>
+        <div class="emp-break">${chips.join('')||'<span class="chip normal">—</span>'}</div>
+        <div class="emp-body">
+          ${shiftRows}
+          <div class="emp-actions">
+            <button class="btn btn-navy btn-sm" onclick="exportOne('${esc(name).replace(/'/g,"\\'")}')">⤓ DATEV-PDF für ${esc(name)}</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Footer
+  document.getElementById('foot').textContent =
+    SHIFTS.length? `Insgesamt ${SHIFTS.length} Einsätze in ${allMonths().length} Monat(en) gespeichert · Daten liegen nur auf diesem Gerät.` :
+    'Alle Daten werden ausschließlich lokal auf diesem Gerät gespeichert.';
+}
+
+function bemText(n,s,f){
+  const p=[];
+  if(n>0)p.push('Nacht '+fmtH1(n));
+  if(s>0)p.push('So '+fmtH1(s));
+  if(f>0)p.push('Feiertag '+fmtH1(f));
+  return p.join(' · ');
+}
+function cssId(s){ return s.replace(/[^a-zA-Z0-9]/g,'_'); }
+function esc(s){ return (s+'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function toggleEmp(id){ document.getElementById('emp_'+id).classList.toggle('open'); }
+
+// ════════ EDIT / DELETE ════════
+let editId=null;
+function openEdit(shiftId){
+  const s=SHIFTS.find(x=>x.shiftId===shiftId); if(!s)return;
+  editId=shiftId;
+  document.getElementById('m_name').value=s.name;
+  document.getElementById('m_datum').value=s.datum;
+  document.getElementById('m_von').value=s.von;
+  document.getElementById('m_bis').value=s.bis;
+  document.getElementById('m_pause').value=s.pauseMin||0;
+  document.getElementById('modalBg').classList.add('show');
+}
+function closeModal(){ document.getElementById('modalBg').classList.remove('show'); editId=null; }
+function saveEdit(){
+  const s=SHIFTS.find(x=>x.shiftId===editId); if(!s){closeModal();return;}
+  s.name=document.getElementById('m_name').value.trim()||s.name;
+  s.datum=document.getElementById('m_datum').value||s.datum;
+  s.von=document.getElementById('m_von').value||s.von;
+  s.bis=document.getElementById('m_bis').value||s.bis;
+  s.pauseMin=parseInt(document.getElementById('m_pause').value)||0;
+  save(); closeModal(); ensureMonthSelected(); render();
+  toast('Einsatz aktualisiert');
+}
+function delShift(shiftId){
+  if(!confirm('Diesen Einsatz wirklich löschen?'))return;
+  SHIFTS=SHIFTS.filter(s=>s.shiftId!==shiftId);
+  save(); render(); toast('Einsatz gelöscht');
+}
+function clearMonth(){
+  const ym=document.getElementById('monthSel').value; if(!ym)return;
+  if(!confirm('Alle Einsätze für '+monthLabel(ym)+' löschen?'))return;
+  SHIFTS=SHIFTS.filter(s=>monthOf(s)!==ym);
+  save(); ensureMonthSelected(); render(); toast('Monat geleert');
+}
+
+// ════════ DATEV-PDF (jsPDF) ════════
+function drawSheet(doc, name, days, monat, jahr){
+  const ML=20, W=210;
+  doc.setDrawColor(0); doc.setLineWidth(0.3);
+  // Titel
+  doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(20);
+  doc.text('Vorlage zur Dokumentation der täglichen Arbeitszeit', ML, 16);
+  // DATEV-Logo (stilisiert)
+  doc.setFillColor(139,195,74); doc.rect(W-42,9,9,9,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(27,94,32);
+  doc.text('DATEV', W-31, 16);
+  doc.setTextColor(0);
+
+  // Kopf
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  let y=28;
+  doc.text('Firma:', ML, y); doc.rect(ML+20, y-4, 90, 6); doc.setFont('helvetica','bold'); doc.text('BOS Group OHG', ML+22, y); doc.setFont('helvetica','normal');
+  y+=9; doc.text('Name des Mitarbeiters:', ML, y); doc.rect(ML+40, y-4, 70, 6); doc.setFont('helvetica','bold'); doc.text(name, ML+42, y); doc.setFont('helvetica','normal');
+  y+=9; doc.text('Pers.-Nr.:', ML, y); doc.rect(ML+20, y-4, 22, 6);
+  doc.text('Monat/Jahr:', ML+52, y); doc.rect(ML+75, y-4, 35, 6); doc.setFont('helvetica','bold'); doc.text(('0'+monat).slice(-2)+'/'+jahr, ML+77, y); doc.setFont('helvetica','normal');
+
+  // Tabelle
+  const cols=[['Kalender-\ntag',14],['Beginn\n(Uhrzeit)',18],['Pause\n(Dauer)',16],['Ende\n(Uhrzeit)',18],['Dauer\n(Summe)',18],['*',8],['aufgezeichnet\nam:',28],['Bemerkungen',50]];
+  const x=[ML]; cols.forEach(c=>x.push(x[x.length-1]+c[1]));
+  const top=y+6, rowH=6.0;
+  // Header
+  doc.setFillColor(232,232,232); doc.rect(ML, top, x[x.length-1]-ML, rowH, 'F');
+  doc.setFont('helvetica','normal'); doc.setFontSize(6.3);
+  cols.forEach((c,i)=>{ c[0].split('\n').forEach((ln,j)=>doc.text(ln, x[i]+1.4, top+2.6+j*2.5)); doc.line(x[i],top,x[i],top+rowH); });
+  doc.line(x[x.length-1],top,x[x.length-1],top+rowH);
+  doc.rect(ML, top, x[x.length-1]-ML, rowH);
+
+  const hol=new Set([...bwHolidays(jahr)]);
+  let summe=0;
+  doc.setFontSize(7); doc.setTextColor(0);
+  for(let day=1; day<=31; day++){
+    const ry=top+rowH+(day-1)*rowH;
+    const dd=new Date(jahr,monat-1,day);
+    const valid=(dd.getMonth()===monat-1);
+    const weekendish = valid && (dd.getDay()===0 || hol.has(dkey(dd)));
+    if(weekendish){ doc.setFillColor(242,242,242); doc.rect(ML, ry, x[x.length-1]-ML, rowH, 'F'); }
+    for(let i=0;i<cols.length;i++) doc.line(x[i],ry,x[i],ry+rowH);
+    doc.line(x[x.length-1],ry,x[x.length-1],ry+rowH);
+    doc.rect(ML, ry, x[x.length-1]-ML, rowH);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7);
+    doc.text(String(day), x[0]+1.5, ry+4);
+    const e=days[day];
+    if(e){
+      const shifts=e.shifts;
+      const von = shifts[0].von;
+      const bis = shifts.length===1? shifts[0].bis : 'mehrere';
+      const pause = e.pause? Math.floor(e.pause/60)+':'+('0'+(e.pause%60)).slice(-2):'0:00';
+      doc.text(von, x[1]+1.5, ry+4);
+      doc.text(pause, x[2]+1.5, ry+4);
+      doc.text(bis, x[3]+1.5, ry+4);
+      doc.text(fmtH(H(e.dauer)), x[4]+1.5, ry+4);
+      doc.text(e.aufgez, x[6]+1.5, ry+4);
+      let bem=bemText(H(e.nacht),H(e.sonntag),H(e.feiertag));
+      if(shifts.length>1){ bem = shifts.map(s=>s.von+'-'+s.bis).join(' + ') + (bem?' · '+bem:''); }
+      doc.setFontSize(5.6); doc.text(bem, x[7]+1.2, ry+4); doc.setFontSize(7);
+      summe+=e.dauer;
+    }
+  }
+  // Summe
+  const sy=top+rowH+31*rowH+5;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8);
+  doc.text('Summe:', x[4]-2, sy, {align:'right'});
+  doc.rect(x[4]+2, sy-3.6, 22, 5);
+  doc.setFont('helvetica','bold'); doc.text(fmtH(H(summe)), x[4]+4, sy);
+
+  // Unterschriften
+  const uy=sy+14; doc.setLineWidth(0.3);
+  doc.line(ML, uy, ML+50, uy); doc.line(ML+90, uy, ML+140, uy);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7);
+  doc.text('Datum', ML, uy+4); doc.text('Unterschrift des Arbeitnehmers', ML+20, uy+4);
+  doc.text('Datum', ML+90, uy+4); doc.text('Unterschrift des Arbeitgebers', ML+110, uy+4);
+
+  // Schlüssel-Legende
+  const ly=uy+12;
+  doc.setFontSize(6);
+  doc.text('* Tragen Sie in diese Spalte eines der folgenden Kürzel ein, wenn es für diesen Kalendertag zutrifft:', ML, ly);
+  doc.setFillColor(217,217,217); doc.rect(ML+20, ly+3, 26, 13, 'FD');
+  doc.text('Schlüssel', ML+27, ly+10);
+  const keys=[['K','Krank'],['U','Urlaub'],['UU','unbezahlter Urlaub'],['F','Feiertag'],['SA','Stundenweise abwesend'],['SU','Stundenweise Urlaub']];
+  keys.forEach((kv,i)=>{ const yy=ly+5+i*2.0; doc.setFont('helvetica','bold'); doc.text(kv[0], ML+50, yy); doc.setFont('helvetica','normal'); doc.text(kv[1], ML+58, yy); });
+
+  // Fußzeile
+  doc.setTextColor(110); doc.setFontSize(6);
+  doc.text('© DATEV eG 2015, alle Rechte vorbehalten', ML, 290);
+  doc.text('Stand 01/2015', W-20, 290, {align:'right'});
+  doc.setTextColor(0);
+}
+
+function makeDoc(name){
+  const {jsPDF}=window.jspdf;
+  const ym=document.getElementById('monthSel').value;
+  const [jahr,monat]=ym.split('-').map(Number);
+  const days=monthData(ym)[name]; if(!days)return null;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  drawSheet(doc, name, days, monat, jahr);
+  return {doc, fname:`DATEV_${cssId(name)}_${ym}.pdf`};
+}
+function exportOne(name){
+  if(!window.jspdf){ toast('PDF-Bibliothek lädt…',true); return; }
+  const r=makeDoc(name); if(!r){toast('Keine Daten',true);return;}
+  r.doc.save(r.fname);
+}
+async function exportAll(){
+  if(!window.jspdf){ toast('PDF-Bibliothek lädt…',true); return; }
+  const ym=document.getElementById('monthSel').value;
+  const names=Object.keys(monthData(ym)).sort();
+  if(!names.length){toast('Keine Daten',true);return;}
+  for(let i=0;i<names.length;i++){
+    const r=makeDoc(names[i]); if(r) r.doc.save(r.fname);
+    await new Promise(res=>setTimeout(res,400)); // Downloads nacheinander
+  }
+  toast(names.length+' DATEV-PDFs erzeugt');
+}
+
+// ════════ TOAST ════════
+let toastT=null;
+function toast(msg,err){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='toast show'+(err?' err':'');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.className='toast',3000);
+}
+
+// ════════ DnD + Init ════════
+const drop=document.getElementById('drop'), fi=document.getElementById('fileInput');
+fi.addEventListener('change',e=>{ handleFiles([...e.target.files]); fi.value=''; });
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+drop.addEventListener('drop',e=>{ handleFiles([...e.dataTransfer.files]); });
+
+load(); ensureMonthSelected(); render();
+</script>
+</body>
+</html>
