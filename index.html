@@ -98,6 +98,9 @@
   .fld{margin-bottom:.75rem;}
   .fld label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px;}
   .fld input{width:100%;padding:.6rem .7rem;border:1.5px solid var(--line);border-radius:8px;font-size:15px;font-family:var(--font);-webkit-appearance:none;}
+  .fld select{width:100%;padding:.6rem .7rem;border:1.5px solid var(--line);border-radius:8px;font-size:15px;font-family:var(--font);background:#fff;color:var(--ink);-webkit-appearance:none;appearance:none;}
+  .fld select:focus{outline:none;border-color:var(--navy);}
+  .badge-manual{display:inline-block;font-size:10px;font-weight:600;color:var(--gold);border:1px solid var(--gold);border-radius:10px;padding:0 6px;margin-left:5px;vertical-align:middle;letter-spacing:.02em;}
   .fld input:focus{outline:none;border-color:var(--navy);}
   .fld-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;}
   .modal-acts{display:flex;justify-content:space-between;gap:.6rem;margin-top:1.1rem;}
@@ -144,6 +147,7 @@
       <label>Monat</label>
       <select id="monthSel" onchange="render()"></select>
     </div>
+    <button class="btn btn-navy btn-sm" onclick="openAdd()">+ Eintrag</button>
     <div class="spacer"></div>
     <button class="btn btn-red" id="exportAll" onclick="exportAll()">⤓ Alle DATEV-PDFs</button>
     <button class="btn btn-ghost btn-sm" onclick="clearMonth()">Monat leeren</button>
@@ -164,7 +168,8 @@
     <h3 id="modalTitle">Einsatz bearbeiten</h3>
     <div class="fld">
       <label>Name</label>
-      <input type="text" id="m_name">
+      <select id="m_nameSel" onchange="onModalName()"></select>
+      <input type="text" id="m_name" placeholder="Name eingeben" style="display:none;margin-top:.5rem;">
     </div>
     <div class="fld">
       <label>Datum</label>
@@ -322,7 +327,7 @@ function monthData(ym){
     const day=+s.datum.split('-')[2];
     const slot=(ma[s.name]=ma[s.name]||{});
     const d=(slot[day]=slot[day]||{shifts:[],pause:0,dauer:0,normal:0,nacht:0,sonntag:0,feiertag:0,aufgez:deDate(s.datum)});
-    d.shifts.push({von:s.von,bis:s.bis,shiftId:s.shiftId,taetigkeit:s.taetigkeit,pauseMin:s.pauseMin,datum:s.datum,name:s.name});
+    d.shifts.push({von:s.von,bis:s.bis,shiftId:s.shiftId,taetigkeit:s.taetigkeit,pauseMin:s.pauseMin,datum:s.datum,name:s.name,manual:s.manual});
     d.pause+=s.pauseMin; d.dauer+=c.netMin; d.normal+=c.normal; d.nacht+=c.nacht; d.sonntag+=c.sonntag; d.feiertag+=c.feiertag;
   });
   return ma;
@@ -371,7 +376,7 @@ function render(){
           const bem=bemText(H(c.nacht),H(c.sonntag),H(c.feiertag));
           return `<div class="shift">
             <div class="d">${('0'+day).slice(-2)}.</div>
-            <div class="info">${sh.von}–${sh.bis}${sh.pauseMin?' · '+sh.pauseMin+'min Pause':''} · <strong>${fmtH(H(c.netMin))}h</strong>
+            <div class="info">${sh.von}–${sh.bis}${sh.pauseMin?' · '+sh.pauseMin+'min Pause':''} · <strong>${fmtH(H(c.netMin))}h</strong>${sh.manual?' <span class="badge-manual">manuell</span>':''}
               <div class="sub">${bem||'—'}</div></div>
             <div class="acts">
               <button class="icon-btn" onclick="openEdit('${sh.shiftId}')">✎</button>
@@ -414,28 +419,78 @@ function cssId(s){ return s.replace(/[^a-zA-Z0-9]/g,'_'); }
 function esc(s){ return (s+'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function toggleEmp(id){ document.getElementById('emp_'+id).classList.toggle('open'); }
 
-// ════════ EDIT / DELETE ════════
+// ════════ EDIT / ADD / DELETE ════════
+const MA_LIST=['Julius D.','Matthis R.','Jürgen K.','Robin B.','Georgi O.','Felix S.','Alex M.','Kim S.','Darius H.','Idris N.','Elias F.','Deniz Y.'];
+
+function fillNameSelect(){
+  const sel=document.getElementById('m_nameSel');
+  sel.innerHTML='<option value="">– Mitarbeiter wählen –</option>'
+    + MA_LIST.map(n=>`<option value="${n}">${n}</option>`).join('')
+    + '<option value="__other__">Andere (manuell)…</option>';
+}
+function onModalName(){
+  const sel=document.getElementById('m_nameSel'), inp=document.getElementById('m_name');
+  if(sel.value==='__other__'){ inp.style.display='block'; inp.value=''; inp.focus(); }
+  else { inp.style.display='none'; inp.value=sel.value; }
+}
+function setModalName(name){
+  const sel=document.getElementById('m_nameSel'), inp=document.getElementById('m_name');
+  if(MA_LIST.includes(name)){ sel.value=name; inp.style.display='none'; inp.value=name; }
+  else if(name){ sel.value='__other__'; inp.style.display='block'; inp.value=name; }
+  else { sel.value=''; inp.style.display='none'; inp.value=''; }
+}
+
 let editId=null;
 function openEdit(shiftId){
   const s=SHIFTS.find(x=>x.shiftId===shiftId); if(!s)return;
   editId=shiftId;
-  document.getElementById('m_name').value=s.name;
+  document.getElementById('modalTitle').textContent='Einsatz bearbeiten';
+  setModalName(s.name);
   document.getElementById('m_datum').value=s.datum;
   document.getElementById('m_von').value=s.von;
   document.getElementById('m_bis').value=s.bis;
   document.getElementById('m_pause').value=s.pauseMin||0;
   document.getElementById('modalBg').classList.add('show');
 }
+function openAdd(){
+  editId=null;
+  document.getElementById('modalTitle').textContent='Neuer Eintrag (manuell)';
+  setModalName('');
+  // Standard-Datum: heute, falls im gewählten Monat – sonst 1. des Monats
+  const ym=document.getElementById('monthSel').value;
+  let def=new Date().toISOString().slice(0,10);
+  if(ym){ const [y,m]=ym.split('-'); const t=new Date();
+    const dd=(t.getMonth()+1===+m && t.getFullYear()===+y)?t.getDate():1;
+    def=`${y}-${m}-${('0'+dd).slice(-2)}`; }
+  document.getElementById('m_datum').value=def;
+  document.getElementById('m_von').value='';
+  document.getElementById('m_bis').value='';
+  document.getElementById('m_pause').value=0;
+  document.getElementById('modalBg').classList.add('show');
+}
 function closeModal(){ document.getElementById('modalBg').classList.remove('show'); editId=null; }
+
 function saveEdit(){
-  const s=SHIFTS.find(x=>x.shiftId===editId); if(!s){closeModal();return;}
-  s.name=document.getElementById('m_name').value.trim()||s.name;
-  s.datum=document.getElementById('m_datum').value||s.datum;
-  s.von=document.getElementById('m_von').value||s.von;
-  s.bis=document.getElementById('m_bis').value||s.bis;
-  s.pauseMin=parseInt(document.getElementById('m_pause').value)||0;
-  save(); closeModal(); ensureMonthSelected(); render();
-  toast('Einsatz aktualisiert');
+  const name=document.getElementById('m_name').value.trim();
+  const datum=document.getElementById('m_datum').value;
+  const von=document.getElementById('m_von').value;
+  const bis=document.getElementById('m_bis').value;
+  const pause=parseInt(document.getElementById('m_pause').value)||0;
+  if(!name){ toast('Bitte einen Namen wählen',true); return; }
+  if(!datum||!von||!bis){ toast('Datum, Von und Bis sind nötig',true); return; }
+
+  if(editId){
+    const s=SHIFTS.find(x=>x.shiftId===editId); if(!s){closeModal();return;}
+    s.name=name; s.datum=datum; s.von=von; s.bis=bis; s.pauseMin=pause;
+    toast('Einsatz aktualisiert');
+  } else {
+    const id='M-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
+    SHIFTS.push({ shiftId:id, rapportId:id, datum, name, taetigkeit:'', von, bis, pauseMin:pause, kunde:'', manual:true });
+    toast('Manueller Eintrag hinzugefügt');
+  }
+  save(); closeModal(); ensureMonthSelected();
+  document.getElementById('monthSel').value = datum.slice(0,7); // auf Monat des Eintrags springen
+  render();
 }
 function delShift(shiftId){
   if(!confirm('Diesen Einsatz wirklich löschen?'))return;
@@ -583,7 +638,7 @@ fi.addEventListener('change',e=>{ handleFiles([...e.target.files]); fi.value='';
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
 drop.addEventListener('drop',e=>{ handleFiles([...e.dataTransfer.files]); });
 
-load(); ensureMonthSelected(); render();
+load(); fillNameSelect(); ensureMonthSelected(); render();
 </script>
 </body>
 </html>
