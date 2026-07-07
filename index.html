@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#13324B">
 <title>BOS · DATEV-Auswertung</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pocketbase@0.26.4/dist/pocketbase.umd.min.js"></script>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   :root{
@@ -112,6 +113,16 @@
 
   .footnote{font-size:12px;color:var(--muted);text-align:center;margin-top:1.5rem;line-height:1.6;}
 
+  /* LOGIN */
+  #loginOverlay{position:fixed;inset:0;background:var(--navy);display:flex;align-items:center;justify-content:center;z-index:500;padding:1rem;}
+  #loginOverlay.hidden{display:none;}
+  .login-card{background:#fff;border-radius:16px;padding:1.75rem;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+  .login-brand{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;color:var(--navy);}
+  .login-brand .badge{background:var(--red);color:#fff;font-size:12px;font-weight:800;padding:3px 8px;border-radius:4px;}
+  .login-sub{font-size:13px;color:var(--muted);margin:.6rem 0 1.1rem;}
+  .btn-full{width:100%;justify-content:center;margin-top:.4rem;}
+  .login-err{color:var(--red);font-size:13px;margin-top:.7rem;min-height:1em;text-align:center;}
+
   @media(max-width:620px){
     .summary{grid-template-columns:repeat(2,1fr);}
     .fld-row{grid-template-columns:1fr 1fr;}
@@ -120,12 +131,27 @@
 </head>
 <body>
 
+<!-- LOGIN-OVERLAY -->
+<div id="loginOverlay">
+  <div class="login-card">
+    <div class="login-brand"><span class="badge">BOS</span><span>DATEV-Auswertung</span></div>
+    <p class="login-sub">Bitte anmelden, um auf die Einsatzdaten zuzugreifen.</p>
+    <div class="fld"><label>E-Mail</label><input type="email" id="loginEmail" autocomplete="username"></div>
+    <div class="fld"><label>Passwort</label><input type="password" id="loginPass" autocomplete="current-password"></div>
+    <button class="btn btn-navy btn-full" id="loginBtn" onclick="doLogin()">Anmelden</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
 <div class="topbar">
   <div class="brand">
     <span class="badge">BOS</span>
     <span class="t">DATEV-Auswertung</span>
   </div>
-  <span class="meta" id="storeMeta">lokal gespeichert</span>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span class="meta" id="userMeta"></span>
+    <button class="btn btn-ghost btn-sm" id="logoutBtn" onclick="doLogout()" style="display:none;color:#fff;border-color:rgba(255,255,255,.35);">Abmelden</button>
+  </div>
 </div>
 
 <div class="wrap">
@@ -230,17 +256,38 @@ function classifyShift(datumStr,von,bis,pauseMin){
 }
 const H=m=>Math.round(m/60*100)/100;
 const fmtH=x=>x.toFixed(2).replace('.',',');
-const fmtH1=x=>x.toFixed(1).replace('.',',');
 
-// ════════ STORAGE ════════
-const KEY='bosDatevShifts_v1';
-let SHIFTS=[];  // {shiftId,rapportId,datum,name,taetigkeit,von,bis,pauseMin,kunde}
+// ════════ CLOUD-SPEICHER (PocketBase) ════════
+const PB_URL = 'https://datev.bos-group.org';   // <-- euer Server
+const CACHE_KEY = 'bosDatevCache_v1';
+const pb = new PocketBase(PB_URL);
+pb.autoCancellation(false);   // wichtig: mehrere Uploads gleichzeitig nicht abbrechen
 
-function load(){
-  try{ SHIFTS=JSON.parse(localStorage.getItem(KEY)||'[]'); }catch(e){ SHIFTS=[]; }
+let SHIFTS=[];  // {shiftId,rapportId,datum,name,taetigkeit,von,bis,pauseMin,kunde,manual}
+
+function mapRecord(r){
+  return {
+    shiftId: r.id, rapportId: r.rapportId||'', datum: r.datum||'',
+    name: r.name||'', taetigkeit: r.taetigkeit||'',
+    von: r.von||'', bis: r.bis||'', pauseMin: r.pauseMin||0,
+    kunde: r.kunde||'', manual: !!r.manual
+  };
 }
-function save(){
-  try{ localStorage.setItem(KEY, JSON.stringify(SHIFTS)); }catch(e){ toast('Speichern fehlgeschlagen',true); }
+function cacheLocal(){
+  try{ localStorage.setItem(CACHE_KEY, JSON.stringify(SHIFTS)); }catch(e){}
+}
+async function cloudLoad(){
+  try{
+    const recs = await pb.collection('shifts').getFullList({ sort:'datum' });
+    SHIFTS = recs.map(mapRecord);
+    cacheLocal();
+    return true;
+  }catch(e){
+    // Offline / Server pausiert → zwischengespeicherte Daten anzeigen
+    try{ SHIFTS = JSON.parse(localStorage.getItem(CACHE_KEY)||'[]'); }catch(_){ SHIFTS=[]; }
+    toast('Offline – zeige zwischengespeicherte Daten', true);
+    return false;
+  }
 }
 
 // ════════ PDF EINLESEN (Roh-Scan) ════════
@@ -269,35 +316,39 @@ async function parseRapport(file){
 
 // ════════ UPLOAD HANDLING ════════
 async function handleFiles(files){
-  let added=0, skipped=0, bad=0;
+  let added=0, skipped=0, bad=0, failed=0;
   for(const f of files){
     if(f.type!=='application/pdf' && !f.name.toLowerCase().endsWith('.pdf')){ bad++; continue; }
     const data=await parseRapport(f);
     if(!data){ bad++; continue; }
     // Dedup: Rapport-ID schon vorhanden?
     if(SHIFTS.some(s=>s.rapportId===data.id)){ skipped++; continue; }
-    (data.mitarbeiter||[]).forEach((emp,idx)=>{
-      SHIFTS.push({
-        shiftId: data.id+'_'+idx,
-        rapportId: data.id,
-        datum: data.datum,
-        name: emp.name||'(ohne Name)',
-        taetigkeit: emp.taetigkeit||'',
-        von: emp.von||'', bis: emp.bis||'',
-        pauseMin: emp.pauseMin||0,
-        kunde: data.kunde||''
-      });
-    });
-    added++;
+    try{
+      for(const emp of (data.mitarbeiter||[])){
+        const rec = await pb.collection('shifts').create({
+          rapportId: data.id,
+          datum: data.datum,
+          name: emp.name||'(ohne Name)',
+          taetigkeit: emp.taetigkeit||'',
+          von: emp.von||'', bis: emp.bis||'',
+          pauseMin: emp.pauseMin||0,
+          kunde: data.kunde||'',
+          manual: false
+        });
+        SHIFTS.push(mapRecord(rec));
+      }
+      added++;
+    }catch(e){ failed++; }
   }
-  save();
+  cacheLocal();
   ensureMonthSelected();
   render();
   let msg=[];
   if(added)   msg.push(added+' Rapport'+(added>1?'e':'')+' hinzugefügt');
   if(skipped) msg.push(skipped+' bereits erfasst');
   if(bad)     msg.push(bad+' ohne lesbare Daten');
-  toast(msg.join(' · ')||'Keine Dateien', bad&&!added);
+  if(failed)  msg.push(failed+' fehlgeschlagen (Server?)');
+  toast(msg.join(' · ')||'Keine Dateien', (bad||failed)&&!added);
 }
 
 // ════════ MONTH HELPERS ════════
@@ -349,10 +400,10 @@ function render(){
   names.forEach(n=>Object.values(data[n]).forEach(d=>{tot.dauer+=d.dauer;tot.normal+=d.normal;tot.nacht+=d.nacht;tot.sonntag+=d.sonntag;tot.feiertag+=d.feiertag;}));
   summary.innerHTML=`
     <div class="scard"><div class="n">${names.length}</div><div class="l">Mitarbeiter</div></div>
-    <div class="scard accent"><div class="n">${fmtH1(H(tot.dauer))}</div><div class="l">Std. gesamt</div></div>
-    <div class="scard"><div class="n">${fmtH1(H(tot.nacht))}</div><div class="l">Nacht</div></div>
-    <div class="scard"><div class="n">${fmtH1(H(tot.sonntag))}</div><div class="l">Sonntag</div></div>
-    <div class="scard"><div class="n">${fmtH1(H(tot.feiertag))}</div><div class="l">Feiertag</div></div>`;
+    <div class="scard accent"><div class="n">${fmtH(H(tot.dauer))}</div><div class="l">Std. gesamt</div></div>
+    <div class="scard"><div class="n">${fmtH(H(tot.nacht))}</div><div class="l">Nacht</div></div>
+    <div class="scard"><div class="n">${fmtH(H(tot.sonntag))}</div><div class="l">Sonntag</div></div>
+    <div class="scard"><div class="n">${fmtH(H(tot.feiertag))}</div><div class="l">Feiertag</div></div>`;
 
   // Employee list
   if(names.length===0){
@@ -365,10 +416,10 @@ function render(){
       let sum={dauer:0,normal:0,nacht:0,sonntag:0,feiertag:0};
       Object.values(days).forEach(d=>{for(const k in sum)sum[k]+=d[k];});
       const chips=[];
-      if(H(sum.normal)>0)  chips.push(`<span class="chip normal">Normal ${fmtH1(H(sum.normal))}</span>`);
-      if(H(sum.nacht)>0)   chips.push(`<span class="chip nacht">Nacht ${fmtH1(H(sum.nacht))}</span>`);
-      if(H(sum.sonntag)>0) chips.push(`<span class="chip sonntag">So ${fmtH1(H(sum.sonntag))}</span>`);
-      if(H(sum.feiertag)>0)chips.push(`<span class="chip feiertag">Feiertag ${fmtH1(H(sum.feiertag))}</span>`);
+      if(H(sum.normal)>0)  chips.push(`<span class="chip normal">Normal ${fmtH(H(sum.normal))}</span>`);
+      if(H(sum.nacht)>0)   chips.push(`<span class="chip nacht">Nacht ${fmtH(H(sum.nacht))}</span>`);
+      if(H(sum.sonntag)>0) chips.push(`<span class="chip sonntag">So ${fmtH(H(sum.sonntag))}</span>`);
+      if(H(sum.feiertag)>0)chips.push(`<span class="chip feiertag">Feiertag ${fmtH(H(sum.feiertag))}</span>`);
       const shiftRows=Object.keys(days).sort((a,b)=>a-b).map(day=>{
         const d=days[day];
         return d.shifts.map(sh=>{
@@ -410,9 +461,9 @@ function render(){
 
 function bemText(n,s,f){
   const p=[];
-  if(n>0)p.push('Nacht '+fmtH1(n));
-  if(s>0)p.push('So '+fmtH1(s));
-  if(f>0)p.push('Feiertag '+fmtH1(f));
+  if(n>0)p.push('Nacht '+fmtH(n));
+  if(s>0)p.push('So '+fmtH(s));
+  if(f>0)p.push('Feiertag '+fmtH(f));
   return p.join(' · ');
 }
 function cssId(s){ return s.replace(/[^a-zA-Z0-9]/g,'_'); }
@@ -470,7 +521,7 @@ function openAdd(){
 }
 function closeModal(){ document.getElementById('modalBg').classList.remove('show'); editId=null; }
 
-function saveEdit(){
+async function saveEdit(){
   const name=document.getElementById('m_name').value.trim();
   const datum=document.getElementById('m_datum').value;
   const von=document.getElementById('m_von').value;
@@ -479,29 +530,41 @@ function saveEdit(){
   if(!name){ toast('Bitte einen Namen wählen',true); return; }
   if(!datum||!von||!bis){ toast('Datum, Von und Bis sind nötig',true); return; }
 
-  if(editId){
-    const s=SHIFTS.find(x=>x.shiftId===editId); if(!s){closeModal();return;}
-    s.name=name; s.datum=datum; s.von=von; s.bis=bis; s.pauseMin=pause;
-    toast('Einsatz aktualisiert');
-  } else {
-    const id='M-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
-    SHIFTS.push({ shiftId:id, rapportId:id, datum, name, taetigkeit:'', von, bis, pauseMin:pause, kunde:'', manual:true });
-    toast('Manueller Eintrag hinzugefügt');
-  }
-  save(); closeModal(); ensureMonthSelected();
-  document.getElementById('monthSel').value = datum.slice(0,7); // auf Monat des Eintrags springen
+  try{
+    if(editId){
+      const s=SHIFTS.find(x=>x.shiftId===editId); if(!s){closeModal();return;}
+      const rec = await pb.collection('shifts').update(editId, {name,datum,von,bis,pauseMin:pause});
+      Object.assign(s, mapRecord(rec));
+      toast('Einsatz aktualisiert');
+    } else {
+      const rec = await pb.collection('shifts').create({
+        rapportId:'M-'+Date.now().toString(36),
+        datum, name, taetigkeit:'', von, bis, pauseMin:pause, kunde:'', manual:true
+      });
+      SHIFTS.push(mapRecord(rec));
+      toast('Manueller Eintrag hinzugefügt');
+    }
+  }catch(e){ toast('Speichern fehlgeschlagen (Server erreichbar?)',true); return; }
+  cacheLocal(); closeModal(); ensureMonthSelected();
+  document.getElementById('monthSel').value = datum.slice(0,7);
   render();
 }
-function delShift(shiftId){
+async function delShift(shiftId){
   if(!confirm('Diesen Einsatz wirklich löschen?'))return;
+  try{ await pb.collection('shifts').delete(shiftId); }
+  catch(e){ toast('Löschen fehlgeschlagen (Server?)',true); return; }
   SHIFTS=SHIFTS.filter(s=>s.shiftId!==shiftId);
-  save(); render(); toast('Einsatz gelöscht');
+  cacheLocal(); render(); toast('Einsatz gelöscht');
 }
-function clearMonth(){
+async function clearMonth(){
   const ym=document.getElementById('monthSel').value; if(!ym)return;
-  if(!confirm('Alle Einsätze für '+monthLabel(ym)+' löschen?'))return;
+  const toDel=SHIFTS.filter(s=>monthOf(s)===ym);
+  if(!confirm('Alle '+toDel.length+' Einsätze für '+monthLabel(ym)+' löschen?'))return;
+  try{
+    for(const s of toDel){ await pb.collection('shifts').delete(s.shiftId); }
+  }catch(e){ toast('Löschen teilweise fehlgeschlagen (Server?)',true); }
   SHIFTS=SHIFTS.filter(s=>monthOf(s)!==ym);
-  save(); ensureMonthSelected(); render(); toast('Monat geleert');
+  cacheLocal(); ensureMonthSelected(); render(); toast('Monat geleert');
 }
 
 // ════════ DATEV-PDF (jsPDF) ════════
@@ -595,6 +658,30 @@ function drawSheet(doc, name, days, monat, jahr){
   doc.text('© DATEV eG 2015, alle Rechte vorbehalten', ML, 290);
   doc.text('Stand 01/2015', W-20, 290, {align:'right'});
   doc.setTextColor(0);
+
+  // Zuschläge-Summenbox (unten rechts)
+  const ztot={nacht:0,sonntag:0,feiertag:0};
+  Object.values(days).forEach(d=>{ ztot.nacht+=d.nacht; ztot.sonntag+=d.sonntag; ztot.feiertag+=d.feiertag; });
+  const zrows=[];
+  if(H(ztot.nacht)>0)    zrows.push(['Nachtzuschlag', H(ztot.nacht)]);
+  if(H(ztot.sonntag)>0)  zrows.push(['Sonntagszuschlag', H(ztot.sonntag)]);
+  if(H(ztot.feiertag)>0) zrows.push(['Feiertagszuschlag', H(ztot.feiertag)]);
+  if(zrows.length){
+    const bx=130, bw=60, lineH=4.4;
+    const bh=(zrows.length+1)*lineH+2.5;
+    const by=287-bh;
+    doc.setFillColor(248,248,248); doc.setDrawColor(150); doc.setLineWidth(0.3);
+    doc.rect(bx, by, bw, bh, 'FD');
+    doc.setTextColor(0);
+    doc.setFont('helvetica','bold'); doc.setFontSize(6.8);
+    doc.text('Zuschläge gesamt (Std.)', bx+2, by+lineH);
+    doc.setFont('helvetica','normal'); doc.setFontSize(6.8);
+    zrows.forEach((r,i)=>{
+      const yy=by+lineH*(i+2);
+      doc.text(r[0], bx+2, yy);
+      doc.text('× '+fmtH(r[1]), bx+bw-2, yy, {align:'right'});
+    });
+  }
 }
 
 function makeDoc(name){
@@ -638,7 +725,51 @@ fi.addEventListener('change',e=>{ handleFiles([...e.target.files]); fi.value='';
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
 drop.addEventListener('drop',e=>{ handleFiles([...e.dataTransfer.files]); });
 
-load(); fillNameSelect(); ensureMonthSelected(); render();
+// ════════ LOGIN / LOGOUT / INIT ════════
+async function doLogin(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const pass=document.getElementById('loginPass').value;
+  const err=document.getElementById('loginErr');
+  const btn=document.getElementById('loginBtn');
+  err.textContent=''; btn.disabled=true; btn.textContent='Anmelden…';
+  try{
+    await pb.collection('users').authWithPassword(email, pass);
+    await startApp();
+  }catch(e){
+    err.textContent='Anmeldung fehlgeschlagen. E-Mail/Passwort prüfen.';
+  }finally{
+    btn.disabled=false; btn.textContent='Anmelden';
+  }
+}
+function doLogout(){
+  pb.authStore.clear();
+  document.getElementById('loginOverlay').classList.remove('hidden');
+  document.getElementById('logoutBtn').style.display='none';
+  document.getElementById('userMeta').textContent='';
+  document.getElementById('loginPass').value='';
+}
+async function startApp(){
+  document.getElementById('loginOverlay').classList.add('hidden');
+  document.getElementById('logoutBtn').style.display='';
+  const rec = pb.authStore.record || pb.authStore.model;
+  document.getElementById('userMeta').textContent = rec ? rec.email : '';
+  fillNameSelect();
+  await cloudLoad();
+  ensureMonthSelected();
+  render();
+}
+
+// Beim Laden: schon eingeloggt? → App starten, sonst Login zeigen
+(async function init(){
+  fillNameSelect();
+  if(pb.authStore.isValid){
+    try{ await pb.collection('users').authRefresh(); await startApp(); return; }
+    catch(e){ pb.authStore.clear(); }
+  }
+  document.getElementById('loginOverlay').classList.remove('hidden');
+  // Enter-Taste im Login
+  document.getElementById('loginPass').addEventListener('keyup',e=>{ if(e.key==='Enter') doLogin(); });
+})();
 </script>
 </body>
 </html>
