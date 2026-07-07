@@ -455,8 +455,8 @@ function render(){
 
   // Footer
   document.getElementById('foot').textContent =
-    SHIFTS.length? `Insgesamt ${SHIFTS.length} Einsätze in ${allMonths().length} Monat(en) gespeichert · Daten liegen nur auf diesem Gerät.` :
-    'Alle Daten werden ausschließlich lokal auf diesem Gerät gespeichert.';
+    SHIFTS.length? `Insgesamt ${SHIFTS.length} Einsätze in ${allMonths().length} Monat(en) gespeichert · Daten liegen zentral in der Cloud gespeichert.` :
+    'Alle Daten werden ausschließlich zentral in der Cloud gespeichert.';
 }
 
 function bemText(n,s,f){
